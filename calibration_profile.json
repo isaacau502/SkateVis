@@ -1,32 +1,32 @@
 {
   "bodyDims": {
-    "heightCm": 185.0,
-    "inseamCm": 99.0,
-    "armLengthCm": 79.0,
-    "shoulderWidthCm": 43.0,
-    "standingHeight": 0.535,
-    "torsoLength": 0.465,
-    "upperArmLen": 0.235,
-    "forearmLen": 0.192,
-    "shoulderSpread": 0.232,
-    "scale": 1.85
+    "heightCm": 166.0,
+    "inseamCm": 90.0,
+    "armLengthCm": 57.0,
+    "shoulderWidthCm": 38.0,
+    "standingHeight": 0.542,
+    "torsoLength": 0.458,
+    "upperArmLen": 0.189,
+    "forearmLen": 0.155,
+    "shoulderSpread": 0.229,
+    "scale": 1.66
   },
   "dynamicRanges": {
     "body_ref_gravity": [
-      0.03939153254032135,
-      -0.9325948059558868,
-      -0.35878491401672363
+      0.08479855582118034,
+      -0.9321746528148651,
+      0.3517787307500839
     ],
     "board_ref_gravity": [
-      0.03647930920124054,
-      -0.011273914482444525,
-      -0.9992707371711731
+      0.01742688938975334,
+      -0.023963168263435364,
+      -0.9995601177215576
     ],
     "maxSquatTiltDeg": 50.0,
-    "minHeight": 0.241,
-    "maxLeanDeg": 15.0,
-    "maxTorsoRotDeg": 55.8
+    "minHeight": 0.244,
+    "maxLeanDeg": 15.6,
+    "maxTorsoRotDeg": 60.0
   },
   "freeSkateRanges": {},
-  "timestamp": "2026-02-07T10:51:43.280898"
+  "timestamp": "2026-02-07T14:41:49.305675"
 }

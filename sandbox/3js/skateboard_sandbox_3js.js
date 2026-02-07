@@ -166,45 +166,41 @@ const tronGridMaterial = new THREE.ShaderMaterial({
     uniform float uFadeEnd;
     varying vec3 vWorldPos;
 
-    float gridLine(float coord, float lineWidth) {
-      float d = abs(fract(coord - 0.5) - 0.5);
-      float fw = fwidth(coord);
-      return 1.0 - smoothstep(lineWidth - fw, lineWidth + fw, d);
+    float lineDist(float coord, float gridSize) {
+      return abs(fract(coord / gridSize - 0.5) - 0.5) * gridSize;
     }
 
     void main() {
-      float smallGrid = 0.5;
-      float largeGrid = 2.0;
+      float dSmall = min(lineDist(vWorldPos.x, 0.5), lineDist(vWorldPos.y, 0.5));
+      float dLarge = min(lineDist(vWorldPos.x, 2.0), lineDist(vWorldPos.y, 2.0));
 
-      float lineSmall = gridLine(vWorldPos.x / smallGrid, 0.02)
-                       + gridLine(vWorldPos.y / smallGrid, 0.02);
-      lineSmall = clamp(lineSmall, 0.0, 1.0);
+      // Thin bright core
+      float coreSmall = exp(-dSmall * 60.0);
+      float coreLarge = exp(-dLarge * 35.0);
 
-      float lineLarge = gridLine(vWorldPos.x / largeGrid, 0.03)
-                       + gridLine(vWorldPos.y / largeGrid, 0.03);
-      lineLarge = clamp(lineLarge, 0.0, 1.0);
+      // Wide soft glow halo
+      float glowSmall = exp(-dSmall * 12.0);
+      float glowLarge = exp(-dLarge * 6.0);
 
-      float intensity = lineSmall * 0.18 + lineLarge * 0.55;
+      float core = coreSmall * 0.15 + coreLarge * 0.5;
+      float glow = glowSmall * 0.06 + glowLarge * 0.18;
 
+      // Distance fade
       float dist = length(vWorldPos.xy);
       float fade = 1.0 - smoothstep(uFadeStart, uFadeEnd, dist);
       fade *= fade;
 
-      // Gentle pulse: oscillates 0.85–1.15 over ~4 seconds
+      // Gentle pulse
       float pulse = 1.0 + 0.15 * sin(uTime * 1.6);
 
-      // Soft glow halo around lines (wider falloff for bloom feel)
-      float bloomSmall = lineSmall * 0.10;
-      float bloomLarge = lineLarge * 0.20;
-      float glow = (bloomSmall + bloomLarge) * pulse;
+      float combined = (core + glow) * pulse * fade;
+      if (combined < 0.005) discard;
 
-      float alpha = (intensity * pulse + glow) * fade;
+      // Core slightly whiter, glow pure color
+      vec3 col = uColor * (glow * pulse + core * pulse * 0.6)
+               + vec3(1.0) * core * pulse * 0.4;
 
-      if (alpha < 0.005) discard;
-
-      // Boost color brightness on glow portions for bloom
-      vec3 col = uColor * (intensity * pulse + glow * 1.5);
-      gl_FragColor = vec4(col, alpha * 0.7);
+      gl_FragColor = vec4(col * fade, combined * 0.7);
     }
   `,
 });
@@ -567,6 +563,87 @@ function updateFlowArrow(leanDeg) {
   flowArrowhead.quaternion.setFromUnitVectors(up, dir);
 }
 
+// ── Tron Light Trail ─────────────────────────────────────────────────────
+const TRAIL_SEGS = 30;
+const trailMat = new THREE.ShaderMaterial({
+  transparent: true,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+  uniforms: { uColor: { value: new THREE.Color(0x00d4ff) } },
+  vertexShader: `
+    attribute float alpha;
+    varying float vAlpha;
+    void main() {
+      vAlpha = alpha;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 uColor;
+    varying float vAlpha;
+    void main() {
+      if (vAlpha < 0.005) discard;
+      vec3 col = uColor * 1.2 + vec3(1.0) * 0.3;
+      gl_FragColor = vec4(col * vAlpha, vAlpha * 0.8);
+    }
+  `,
+});
+
+const trailGeo = new THREE.BufferGeometry();
+const trailPositions = new Float32Array((TRAIL_SEGS + 1) * 2 * 3);
+const trailAlphas = new Float32Array((TRAIL_SEGS + 1) * 2);
+const trailIndices = [];
+for (let i = 0; i < TRAIL_SEGS; i++) {
+  const a = i * 2, b = i * 2 + 1, c = (i + 1) * 2, d = (i + 1) * 2 + 1;
+  trailIndices.push(a, c, b, b, c, d);
+}
+trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+trailGeo.setAttribute('alpha', new THREE.BufferAttribute(trailAlphas, 1));
+trailGeo.setIndex(trailIndices);
+const trailMesh = new THREE.Mesh(trailGeo, trailMat);
+trailMesh.visible = false;
+let trailEnabled = true; // user toggle
+scene.add(trailMesh);
+
+function buildTrailPath(leanDeg) {
+  const curvature = Math.max(-1, Math.min(1, leanDeg / dims.maxLeanDeg)) * 0.8;
+  const trailLen = 2.0;
+  const pts = [];
+  for (let i = 0; i <= TRAIL_SEGS; i++) {
+    const t = i / TRAIL_SEGS;
+    const y = -0.2 - t * trailLen;
+    const x = curvature * t * t * trailLen;
+    pts.push({ x, y, t });
+  }
+  return pts;
+}
+
+function updateTrail(leanDeg) {
+  const pts = buildTrailPath(leanDeg);
+  const pos = trailGeo.attributes.position.array;
+  const alp = trailGeo.attributes.alpha.array;
+  const hipZ = dims.standingHeight - (state.squatPct / 100) * (dims.standingHeight - dims.minHeight);
+  const leanRad = (leanDeg * Math.PI) / 180;
+  const leanOffsetX = -Math.sin(leanRad) * hipZ;
+  for (let i = 0; i <= TRAIL_SEGS; i++) {
+    const p = pts[i];
+    const idx = i * 2;
+    // Bottom edge (ground)
+    pos[idx * 3] = p.x;
+    pos[idx * 3 + 1] = p.y;
+    pos[idx * 3 + 2] = 0.005;
+    // Top edge (hip height, leaned with board)
+    pos[(idx + 1) * 3] = p.x + leanOffsetX;
+    pos[(idx + 1) * 3 + 1] = p.y;
+    pos[(idx + 1) * 3 + 2] = Math.cos(leanRad) * hipZ;
+    const a = 1.0 - p.t;
+    alp[idx] = a;
+    alp[idx + 1] = a;
+  }
+  trailGeo.attributes.position.needsUpdate = true;
+  trailGeo.attributes.alpha.needsUpdate = true;
+}
+
 function degToRad(deg) {
   return (deg * Math.PI) / 180;
 }
@@ -881,6 +958,8 @@ function updateModel() {
   jointPoints.forEach((p, idx) => joints[idx].position.copy(p));
 
   updateFlowArrow(state.leanDeg);
+  trailMesh.visible = trailEnabled && playback.sessionMode;
+  if (trailMesh.visible) updateTrail(state.leanDeg);
 
   // Update telemetry cards
   // Edge label depends on stance: positive lean = toeside for goofy, heelside for regular
@@ -1349,6 +1428,15 @@ function bindUI() {
       if (liveWS.ws && liveWS.ws.readyState === WebSocket.OPEN) {
         liveWS.ws.send(JSON.stringify({ action: "set_stance", isGoofy: state.isGoofy }));
       }
+      updateModel();
+    });
+  }
+
+  const trailToggle = document.getElementById("trailToggle");
+  if (trailToggle) {
+    trailToggle.addEventListener("click", () => {
+      trailEnabled = !trailEnabled;
+      trailToggle.textContent = trailEnabled ? "Trail: ON" : "Trail: OFF";
       updateModel();
     });
   }
